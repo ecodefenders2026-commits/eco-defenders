@@ -1,0 +1,133 @@
+{
+  "model_name": "xgboost_flood",
+  "model_version": "1.0.0",
+  "trained_timestamp": "2026-09-17T23:25:36.676827",
+  "train_rows": 5880,
+  "test_rows": 1260,
+  "hyperparameters": {
+    "n_estimators": 200,
+    "max_depth": 6,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "min_child_weight": 3,
+    "gamma": 0.1,
+    "scale_pos_weight": 2.26
+  },
+  "evaluation_metrics": {
+    "Logistic Regression": {
+      "accuracy": 0.9095,
+      "precision": 0.8752,
+      "recall": 0.9615,
+      "f1_score": 0.9163,
+      "roc_auc": 0.9716,
+      "pr_auc": 0.9727,
+      "confusion_matrix": [
+        [
+          522,
+          89
+        ],
+        [
+          25,
+          624
+        ]
+      ]
+    },
+    "Decision Tree": {
+      "accuracy": 0.8976,
+      "precision": 0.8858,
+      "recall": 0.9199,
+      "f1_score": 0.9025,
+      "roc_auc": 0.9533,
+      "pr_auc": 0.953,
+      "confusion_matrix": [
+        [
+          534,
+          77
+        ],
+        [
+          52,
+          597
+        ]
+      ]
+    },
+    "Random Forest": {
+      "accuracy": 0.9095,
+      "precision": 0.8963,
+      "recall": 0.9322,
+      "f1_score": 0.9139,
+      "roc_auc": 0.9705,
+      "pr_auc": 0.972,
+      "confusion_matrix": [
+        [
+          541,
+          70
+        ],
+        [
+          44,
+          605
+        ]
+      ]
+    },
+    "XGBoost (Primary)": {
+      "accuracy": 0.9056,
+      "precision": 0.866,
+      "recall": 0.9661,
+      "f1_score": 0.9133,
+      "roc_auc": 0.9715,
+      "pr_auc": 0.9723,
+      "confusion_matrix": [
+        [
+          514,
+          97
+        ],
+        [
+          22,
+          627
+        ]
+      ]
+    }
+  },
+  "top_features": [
+    [
+      "water_level_max_3h",
+      0.27321743965148926
+    ],
+    [
+      "river_flow",
+      0.2730112075805664
+    ],
+    [
+      "water_level_m",
+      0.1966855227947235
+    ],
+    [
+      "river_flow_change_15m",
+      0.03769463300704956
+    ],
+    [
+      "water_level_rate_per_hour",
+      0.03363881632685661
+    ],
+    [
+      "water_level_change_15m",
+      0.033343154937028885
+    ],
+    [
+      "rainfall_15m",
+      0.016022546216845512
+    ],
+    [
+      "rainfall_1h",
+      0.013950016349554062
+    ],
+    [
+      "rainfall_mm",
+      0.011778642423450947
+    ],
+    [
+      "water_level_mean_1h",
+      0.011128977872431278
+    ]
+  ]
+}

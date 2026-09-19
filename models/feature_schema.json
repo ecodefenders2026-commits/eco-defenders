@@ -1,0 +1,38 @@
+{
+  "feature_columns": [
+    "rainfall_mm",
+    "water_level_m",
+    "river_flow",
+    "soil_moisture",
+    "dam_water_level_m",
+    "dam_fill_ratio",
+    "temperature",
+    "humidity",
+    "pressure",
+    "wind_speed",
+    "rainfall_15m",
+    "rainfall_30m",
+    "rainfall_1h",
+    "rainfall_3h",
+    "rainfall_6h",
+    "water_level_change_15m",
+    "water_level_rate_per_hour",
+    "water_level_max_3h",
+    "water_level_mean_1h",
+    "river_flow_change_15m",
+    "soil_moisture_trend_1h",
+    "pressure_change_3h",
+    "temp_change_1h",
+    "hour_of_day",
+    "day_of_year"
+  ],
+  "target_column": "flood_target_60m",
+  "horizon_minutes": 60,
+  "node_thresholds": {
+    "NODE_001": 5.0,
+    "NODE_002": 5.5,
+    "NODE_003": 4.8,
+    "NODE_004": 6.2,
+    "NODE_005": 5.2
+  }
+}

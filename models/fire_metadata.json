@@ -1,0 +1,41 @@
+{
+  "model_name": "xgboost_forest_fire",
+  "model_version": "1.0.0",
+  "metrics": {
+    "accuracy": 0.847,
+    "precision": 0.8411,
+    "recall": 0.7637,
+    "f1_score": 0.8005,
+    "roc_auc": 0.9004
+  },
+  "top_features": [
+    [
+      "thermal_temp_c",
+      0.3934914469718933
+    ],
+    [
+      "pm25_ugm3",
+      0.38633087277412415
+    ],
+    [
+      "co2_ppm",
+      0.1655842661857605
+    ],
+    [
+      "humidity_pct",
+      0.017469750717282295
+    ],
+    [
+      "ambient_temp_c",
+      0.014960326254367828
+    ],
+    [
+      "fuel_moisture_pct",
+      0.01325350720435381
+    ],
+    [
+      "wind_speed_ms",
+      0.008909864351153374
+    ]
+  ]
+}

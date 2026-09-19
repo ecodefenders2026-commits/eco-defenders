@@ -1,16 +1,16 @@
 """
-ECO DEFENDERS - API Schema Contracts (Pydantic Models)
----------------------------------------------------
-Defines stable versioned API request/response JSON contracts for real-time
-IoT sensor telemetry ingestion, flood inference, and hazard reporting.
+ECO DEFENDERS - API Schema Contracts
+------------------------------------
+Stable Pydantic models for manual inference, live telemetry ingestion,
+and hazard reporting.
 """
 
-from typing import List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
 class SensorPayload(BaseModel):
-    node_id: str = Field(..., example="NODE_017")
+    node_id: str = Field(..., min_length=1, example="NODE_017")
     timestamp: str = Field(..., example="2026-09-17T19:30:00+05:30")
     rainfall_mm: float = Field(..., example=32.4)
     water_level_m: float = Field(..., example=4.72)
@@ -33,15 +33,15 @@ class RiskFactor(BaseModel):
 
 
 class SensorQualityStatus(BaseModel):
-    status: str = Field(..., example="OK")  # OK, WARNING, ERROR
+    status: str = Field(..., example="OK")
     issues: List[str] = Field(default_factory=list)
 
 
 class PredictionDetails(BaseModel):
     risk_score: int = Field(..., example=87)
     flood_probability: float = Field(..., example=0.87)
-    risk_category: str = Field(..., example="HIGH")  # VERY LOW, LOW, MODERATE, HIGH, CRITICAL
-    severity: str = Field(..., example="SEVERE")      # MINIMAL, MODERATE, SEVERE, EXTREME
+    risk_category: str = Field(..., example="HIGH")
+    severity: str = Field(..., example="SEVERE")
     warning_required: bool = Field(..., example=True)
     estimated_time_to_threshold_minutes: Optional[int] = Field(None, example=42)
     danger_threshold_m: Optional[float] = Field(5.0, example=5.0)
@@ -81,7 +81,7 @@ class MultiHazardResponse(BaseModel):
 
 
 class FireSensorPayload(BaseModel):
-    node_id: str = Field("NODE_FIRE_01", example="NODE_FIRE_01")
+    node_id: str = Field("NODE_FIRE_01", min_length=1, example="NODE_FIRE_01")
     timestamp: str = Field(..., example="2026-09-18T00:30:00+05:30")
     thermal_temp_c: float = Field(..., example=68.5)
     pm25_ugm3: float = Field(..., example=135.0)
@@ -117,3 +117,38 @@ class FirePredictionResponse(BaseModel):
     model: ModelDetails
     timestamp: str = Field(..., example="2026-09-18T00:30:00+05:30")
 
+
+class TelemetryEnvelope(BaseModel):
+    """
+    Canonical flat live-telemetry contract used by simulators and gateways.
+
+    node_id is mandatory and stays attached to the packet from ingestion
+    through inference, storage, and dashboard output.
+    """
+
+    hazard_type: Literal["FLOOD", "FOREST_FIRE"] = Field(..., example="FLOOD")
+    node_id: str = Field(..., min_length=1, example="NODE_FLOOD_07")
+    timestamp: str = Field(..., example="2026-09-19T11:30:00+05:30")
+    latitude: Optional[float] = Field(None, example=18.1234)
+    longitude: Optional[float] = Field(None, example=78.5678)
+
+    # Flood telemetry
+    rainfall_mm: Optional[float] = Field(None, example=38.5)
+    water_level_m: Optional[float] = Field(None, example=4.85)
+    river_flow: Optional[float] = Field(None, example=190.0)
+    soil_moisture: Optional[float] = Field(None, example=78.0)
+    dam_water_level_m: Optional[float] = Field(None, example=22.5)
+    dam_capacity: Optional[float] = Field(None, example=25.0)
+    temperature: Optional[float] = Field(None, example=25.0)
+    humidity: Optional[float] = Field(None, example=80.0)
+    pressure: Optional[float] = Field(None, example=1002.0)
+    wind_speed: Optional[float] = Field(None, example=14.2)
+
+    # Forest-fire telemetry
+    thermal_temp_c: Optional[float] = Field(None, example=92.0)
+    pm25_ugm3: Optional[float] = Field(None, example=280.0)
+    ambient_temp_c: Optional[float] = Field(None, example=42.0)
+    humidity_pct: Optional[float] = Field(None, example=12.0)
+    wind_speed_ms: Optional[float] = Field(None, example=22.0)
+    co2_ppm: Optional[float] = Field(None, example=950.0)
+    fuel_moisture_pct: Optional[float] = Field(None, example=6.0)

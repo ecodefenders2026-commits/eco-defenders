@@ -1,1285 +1,319 @@
 /* ============================================================
-   ECO DEFENDERS
-   Minimal AI Early Warning Interface
+   ECO DEFENDERS — LIVE OUTPUT-ONLY DASHBOARD
+   Browser never sends sensor values. It only reads the latest
+   processed node outputs from the FastAPI server.
 ============================================================ */
 
+const LIVE_POLL_MS = 2000;
 const AppState = {
-
-    hazard:
-        "FLOOD",
-
-    floodNode:
-        "NODE_FLOOD_01",
-
-    fireNode:
-        "NODE_FIRE_01"
+    selectedNodeId: null,
+    nodes: []
 };
 
+document.addEventListener("DOMContentLoaded", () => {
+    refreshLiveDashboard();
+    setInterval(refreshLiveDashboard, LIVE_POLL_MS);
+});
 
-/* ============================================================
-   START
-============================================================ */
-
-document.addEventListener(
-    "DOMContentLoaded",
-    () => {
-
-        selectHazard(
-            "FLOOD"
-        );
-
-    }
-);
-
-
-/* ============================================================
-   HAZARD SELECTION
-============================================================ */
-
-function selectHazard(
-    hazard
-) {
-
-    AppState.hazard =
-        hazard;
-
-
-    document
-        .querySelectorAll(
-            ".hazard-option"
-        )
-        .forEach(button => {
-
-            button.classList.toggle(
-                "active",
-                button.dataset.hazard === hazard
-            );
-
+async function refreshLiveDashboard() {
+    try {
+        const response = await fetch("/api/v1/nodes?live_only=true", {
+            method: "GET",
+            cache: "no-store"
         });
 
+        if (!response.ok) {
+            throw new Error(await getApiError(response));
+        }
 
-    const floodForm =
-        document.getElementById(
-            "flood-form"
-        );
+        const data = await response.json();
+        const nodes = Array.isArray(data.nodes) ? data.nodes : [];
+        AppState.nodes = nodes;
 
-    const fireForm =
-        document.getElementById(
-            "fire-form"
-        );
+        updateSystemStatus(nodes);
+        renderNodeList(nodes);
 
-    const inputTitle =
-        document.getElementById(
-            "input-title"
-        );
+        if (!nodes.length) {
+            showWaitingState();
+            return;
+        }
 
-    const nodeLabel =
-        document.getElementById(
-            "node-label"
-        );
+        const selected = chooseNode(nodes);
+        renderLiveNode(selected);
+        renderRiskDecision(selected);
+    } catch (error) {
+        showConnectionError(error.message);
+    }
+}
 
+function chooseNode(nodes) {
+    let selected = nodes.find(node => node.node_id === AppState.selectedNodeId);
+
+    if (!selected) {
+        selected = [...nodes].sort((a, b) => {
+            return String(b.last_received_at || b.timestamp || "")
+                .localeCompare(String(a.last_received_at || a.timestamp || ""));
+        })[0];
+    }
+
+    AppState.selectedNodeId = selected.node_id;
+    return selected;
+}
+
+function updateSystemStatus(nodes) {
+    const dot = document.getElementById("status-dot");
+    const label = document.getElementById("system-status-text");
+
+    if (nodes.length) {
+        label.textContent = `${nodes.length} LIVE NODE${nodes.length === 1 ? "" : "S"}`;
+        dot.classList.remove("status-waiting", "status-error");
+        return;
+    }
+
+    label.textContent = "WAITING FOR TELEMETRY";
+    dot.classList.add("status-waiting");
+    dot.classList.remove("status-error");
+}
+
+function renderNodeList(nodes) {
+    const list = document.getElementById("node-list");
+    const count = document.getElementById("nodes-count");
+    count.textContent = String(nodes.length);
+
+    if (!nodes.length) {
+        list.innerHTML = `<div class="node-empty">No live telemetry received yet.</div>`;
+        return;
+    }
+
+    list.innerHTML = nodes.map(node => {
+        const category = normaliseRisk(node.risk_category, node.risk_score);
+        const score = clamp(Number(node.risk_score ?? 0), 0, 100);
+        const hazard = node.hazard_type === "FOREST_FIRE" ? "FOREST FIRE" : "FLOOD";
+        const active = node.node_id === AppState.selectedNodeId ? " active" : "";
+        const warning = Boolean(node.warning_required) || category === "HIGH" || category === "CRITICAL";
+
+        return `
+            <div class="node-card${active}">
+                <div class="node-card-top">
+                    <div>
+                        <strong>${escapeHtml(node.node_id || "—")}</strong>
+                        <span>${escapeHtml(hazard)}</span>
+                    </div>
+                    <div class="node-card-score ${riskTextClass(category)}">${Math.round(score)}</div>
+                </div>
+                <div class="node-card-bottom">
+                    <span>${escapeHtml(node.node_name || "Monitoring Node")}</span>
+                    <span class="node-card-state ${riskTextClass(category)}">${warning ? "WARNING" : category}</span>
+                </div>
+            </div>
+        `;
+    }).join("");
+}
+
+function renderLiveNode(node) {
+    const hazard = node.hazard_type === "FOREST_FIRE" ? "FOREST FIRE" : "FLOOD";
+    const lat = Number(node.latitude);
+    const lon = Number(node.longitude);
+
+    document.getElementById("live-node-name").textContent = node.node_name || `Monitoring Node ${node.node_id}`;
+    document.getElementById("live-node-id").textContent = node.node_id || "—";
+    document.getElementById("live-hazard").textContent = hazard;
+    document.getElementById("live-received").textContent = formatReceivedAt(node.last_received_at || node.timestamp);
+    document.getElementById("live-status").textContent = node.is_online ? "ONLINE" : "STALE";
+    document.getElementById("live-location").textContent = Number.isFinite(lat) && Number.isFinite(lon)
+        ? `${lat.toFixed(4)}, ${lon.toFixed(4)}`
+        : "—";
+
+    document.getElementById("telemetry-node").textContent = node.node_id || "—";
 
     if (hazard === "FLOOD") {
-
-        floodForm.classList.remove(
-            "hidden"
-        );
-
-        fireForm.classList.add(
-            "hidden"
-        );
-
-        inputTitle.textContent =
-            "Flood Conditions";
-
-        nodeLabel.textContent =
-            AppState.floodNode;
-
-        document.body.classList.remove(
-            "fire-mode"
-        );
-
+        document.getElementById("telemetry-primary").textContent = formatNumber(node.water_level_m, 2, "m");
+        document.getElementById("telemetry-secondary").textContent = formatNumber(node.rainfall_mm, 1, "mm");
+        document.getElementById("telemetry-flow").textContent = formatNumber(node.river_flow, 1, "m³/s");
+        document.getElementById("telemetry-moisture").textContent = formatNumber(node.soil_moisture, 1, "%");
+        document.getElementById("telemetry-ambient").textContent = `${formatNumber(node.temperature, 1, "°C")} / ${formatNumber(node.pressure, 0, "hPa")}`;
     } else {
-
-        floodForm.classList.add(
-            "hidden"
-        );
-
-        fireForm.classList.remove(
-            "hidden"
-        );
-
-        inputTitle.textContent =
-            "Forest Fire Conditions";
-
-        nodeLabel.textContent =
-            AppState.fireNode;
-
-        document.body.classList.add(
-            "fire-mode"
-        );
-    }
-
-
-    /*
-     * Reset result when user switches hazard.
-     */
-    resetResult();
-}
-
-
-/* ============================================================
-   FLOOD ANALYSIS
-============================================================ */
-
-async function runFloodAnalysis(
-    event
-) {
-
-    event.preventDefault();
-
-
-    const button =
-        document.getElementById(
-            "flood-submit"
-        );
-
-
-    setButtonLoading(
-        button,
-        true,
-        "ANALYSING FLOOD RISK..."
-    );
-
-
-    const payload = {
-
-        node_id:
-            AppState.floodNode,
-
-        timestamp:
-            new Date().toISOString(),
-
-        water_level_m:
-            number(
-                "water",
-                4.85
-            ),
-
-        rainfall_mm:
-            number(
-                "rainfall",
-                38.5
-            ),
-
-        river_flow:
-            number(
-                "flow",
-                190
-            ),
-
-        soil_moisture:
-            number(
-                "soil",
-                78
-            ),
-
-        dam_water_level_m:
-            number(
-                "dam",
-                22.5
-            ),
-
-        dam_capacity:
-            25.0,
-
-        /*
-         * Existing backend expects these
-         * contextual values as well.
-         */
-        temperature:
-            25.0,
-
-        humidity:
-            80.0,
-
-        pressure:
-            1002.0,
-
-        wind_speed:
-            14.2,
-
-        latitude:
-            18.1234,
-
-        longitude:
-            78.5678
-    };
-
-
-    try {
-
-        const response =
-            await fetch(
-                "/api/v1/predict/flood",
-                {
-                    method:
-                        "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body:
-                        JSON.stringify(payload)
-                }
-            );
-
-
-        if (!response.ok) {
-
-            throw new Error(
-                await getApiError(
-                    response
-                )
-            );
-        }
-
-
-        const data =
-            await response.json();
-
-
-        showResult(
-            data,
-            "FLOOD",
-            payload
-        );
-
-    } catch (error) {
-
-        showError(
-            error.message
-        );
-
-    } finally {
-
-        setButtonLoading(
-            button,
-            false,
-            "RUN AI ANALYSIS"
-        );
+        document.getElementById("telemetry-primary").textContent = formatNumber(node.thermal_temp_c, 1, "°C");
+        document.getElementById("telemetry-secondary").textContent = formatNumber(node.pm25_ugm3, 0, "µg/m³");
+        document.getElementById("telemetry-flow").textContent = formatNumber(node.wind_speed, 1, "m/s");
+        document.getElementById("telemetry-moisture").textContent = formatNumber(node.humidity, 1, "%");
+        document.getElementById("telemetry-ambient").textContent = formatNumber(node.temperature, 1, "°C");
     }
 }
 
-
-/* ============================================================
-   FIRE ANALYSIS
-============================================================ */
-
-async function runFireAnalysis(
-    event
-) {
-
-    event.preventDefault();
-
-
-    const button =
-        document.getElementById(
-            "fire-submit"
-        );
-
-
-    setButtonLoading(
-        button,
-        true,
-        "ANALYSING FIRE RISK..."
-    );
-
-
-    const payload = {
-
-        node_id:
-            AppState.fireNode,
-
-        timestamp:
-            new Date().toISOString(),
-
-        thermal_temp_c:
-            number(
-                "thermal",
-                88.5
-            ),
-
-        pm25_ugm3:
-            number(
-                "pm25",
-                220
-            ),
-
-        ambient_temp_c:
-            number(
-                "ambient",
-                38
-            ),
-
-        humidity_pct:
-            number(
-                "humidity",
-                18
-            ),
-
-        wind_speed_ms:
-            number(
-                "wind",
-                15.5
-            ),
-
-        co2_ppm:
-            520.0,
-
-        fuel_moisture_pct:
-            12.0,
-
-        latitude:
-            18.2500,
-
-        longitude:
-            78.6500
-    };
-
-
-    try {
-
-        const response =
-            await fetch(
-                "/api/v1/predict/fire",
-                {
-                    method:
-                        "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body:
-                        JSON.stringify(payload)
-                }
-            );
-
-
-        if (!response.ok) {
-
-            throw new Error(
-                await getApiError(
-                    response
-                )
-            );
-        }
-
-
-        const data =
-            await response.json();
-
-
-        showResult(
-            data,
-            "FOREST_FIRE",
-            payload
-        );
-
-    } catch (error) {
-
-        showError(
-            error.message
-        );
-
-    } finally {
-
-        setButtonLoading(
-            button,
-            false,
-            "RUN AI ANALYSIS"
-        );
-    }
-}
-
-
-/* ============================================================
-   SHOW RESULT
-============================================================ */
-
-function showResult(
-    data,
-    hazard,
-    input
-) {
-
-    const prediction =
-        data?.prediction || data || {};
-
-
-    const score =
-        clamp(
-            Number(
-                prediction.risk_score ?? 0
-            ),
-            0,
-            100
-        );
-
-
-    const category =
-        normaliseRisk(
-            prediction.risk_category,
-            score
-        );
-
-
-    const probability =
-        hazard === "FOREST_FIRE"
-
-            ? Number(
-                prediction.fire_probability
-                ??
-                score / 100
-            )
-
-            : Number(
-                prediction.flood_probability
-                ??
-                score / 100
-            );
-
-
-    const confidence =
-        prediction.confidence != null
-
-            ? Number(
-                prediction.confidence
-            )
-
-            : null;
-
-
-    /*
-     * Main score
-     */
-
-    const scoreElement =
-        document.getElementById(
-            "risk-score"
-        );
-
-    scoreElement.textContent =
-        Math.round(score);
-
-    scoreElement.style.color =
-        riskColour(
-            category
-        );
-
-
-    /*
-     * Hazard title
-     */
-
-    document.getElementById(
-        "result-hazard"
-    ).textContent =
-        hazard === "FOREST_FIRE"
-            ? "FOREST FIRE RISK"
-            : "FLOOD RISK";
-
-
-    /*
-     * Category
-     */
-
-    const state =
-        document.getElementById(
-            "risk-state"
-        );
-
-    state.textContent =
-        category;
-
-    state.className =
-        "state-pill " +
-        riskStateClass(
-            category
-        );
-
-
-    /*
-     * Warning
-     */
-
-    const warning =
-        Boolean(
-            prediction.warning_required
-        )
-        ||
-        category === "HIGH"
-        ||
-        category === "CRITICAL";
-
-
-    const warningBox =
-        document.getElementById(
-            "warning-box"
-        );
-
-
+function renderRiskDecision(node) {
+    const hazard = node.hazard_type === "FOREST_FIRE" ? "FOREST_FIRE" : "FLOOD";
+    const score = clamp(Number(node.risk_score ?? 0), 0, 100);
+    const category = normaliseRisk(node.risk_category, score);
+    const warning = Boolean(node.warning_required) || category === "HIGH" || category === "CRITICAL";
+    const probability = hazard === "FOREST_FIRE"
+        ? Number(node.flood_probability ?? node.fire_probability ?? score / 100)
+        : Number(node.flood_probability ?? score / 100);
+    const confidence = node.confidence == null ? null : Number(node.confidence);
+
+    document.getElementById("result-node-id").textContent = node.node_id || "—";
+    document.getElementById("result-node-hazard").textContent = hazard === "FOREST_FIRE" ? "FOREST FIRE" : "FLOOD";
+    document.getElementById("risk-score").textContent = String(Math.round(score));
+    document.getElementById("risk-score").style.color = riskColour(category);
+    document.getElementById("result-hazard").textContent = hazard === "FOREST_FIRE" ? "FOREST FIRE RISK" : "FLOOD RISK";
+
+    const state = document.getElementById("risk-state");
+    state.textContent = category;
+    state.className = `state-pill ${riskStateClass(category)}`;
+
+    const warningBox = document.getElementById("warning-box");
     if (warning) {
-
-        warningBox.classList.remove(
-            "hidden"
-        );
-
-
-        document.getElementById(
-            "warning-title"
-        ).textContent =
-            `${category} WARNING`;
-
-
-        document.getElementById(
-            "warning-text"
-        ).textContent =
-            buildWarningText(
-                hazard,
-                input,
-                category
-            );
-
+        warningBox.classList.remove("hidden");
+        document.getElementById("warning-title").textContent = `${category} WARNING`;
+        document.getElementById("warning-text").textContent = buildWarningText(node, hazard, category);
     } else {
-
-        warningBox.classList.add(
-            "hidden"
-        );
+        warningBox.classList.add("hidden");
     }
 
-
-    /*
-     * Primary output
-     */
-
     if (hazard === "FLOOD") {
-
-        document.getElementById(
-            "primary-output"
-        ).textContent =
-            `${input.water_level_m.toFixed(2)} m`;
-
+        document.getElementById("primary-output").textContent = formatNumber(node.water_level_m, 2, "m");
+        document.getElementById("threshold-output").textContent = thresholdText(node.water_level_m, 5.0);
     } else {
-
-        document.getElementById(
-            "primary-output"
-        ).textContent =
-            `${input.thermal_temp_c.toFixed(1)} °C`;
+        document.getElementById("primary-output").textContent = formatNumber(node.thermal_temp_c, 1, "°C");
+        document.getElementById("threshold-output").textContent = thresholdText(node.thermal_temp_c, 65.0);
     }
 
+    document.getElementById("time-output").textContent = formatTime(node.estimated_time_to_threshold);
+    document.getElementById("confidence-output").textContent = confidence == null ? "—" : `${Math.round(confidence <= 1 ? confidence * 100 : confidence)}%`;
 
-    /*
-     * Threshold status
-     */
+    const probabilityPct = Number.isFinite(probability) ? Math.round(probability * 100) : score;
+    document.getElementById("result-summary").textContent = buildSummary(node, hazard, category, probabilityPct);
 
-    const thresholdOutput =
-        document.getElementById(
-            "threshold-output"
-        );
+    document.getElementById("result-empty").classList.add("hidden");
+    document.getElementById("result-content").classList.remove("hidden");
+}
 
+function showWaitingState() {
+    document.getElementById("result-empty").classList.remove("hidden");
+    document.getElementById("result-content").classList.add("hidden");
+    document.getElementById("empty-title").textContent = "Waiting for sensor data";
+    document.getElementById("empty-text").textContent = "The dashboard will update automatically when a node sends telemetry to the server.";
+    document.getElementById("live-node-name").textContent = "Waiting for sensor data";
+    document.getElementById("live-node-id").textContent = "—";
+}
 
+function showConnectionError(message) {
+    const label = document.getElementById("system-status-text");
+    const dot = document.getElementById("status-dot");
+    label.textContent = "SERVER CONNECTION ERROR";
+    dot.classList.add("status-error");
+    dot.classList.remove("status-waiting");
+
+    document.getElementById("result-empty").classList.remove("hidden");
+    document.getElementById("result-content").classList.add("hidden");
+    document.getElementById("empty-title").textContent = "Telemetry unavailable";
+    document.getElementById("empty-text").textContent = message || "Unable to reach the live telemetry API.";
+}
+
+function buildSummary(node, hazard, category, probabilityPct) {
     if (hazard === "FLOOD") {
-
-        thresholdOutput.textContent =
-            input.water_level_m >= 5
-
-                ? "BREACHED"
-
-                : `${(
-                    input.water_level_m / 5 * 100
-                  ).toFixed(0)}% of limit`;
-
-    } else {
-
-        thresholdOutput.textContent =
-            input.thermal_temp_c >= 65
-
-                ? "BREACHED"
-
-                : `${(
-                    input.thermal_temp_c / 65 * 100
-                  ).toFixed(0)}% of limit`;
+        if (category === "HIGH" || category === "CRITICAL") {
+            return `The AI identifies a ${category.toLowerCase()} flood risk with an estimated probability of ${probabilityPct}%. River level, rainfall and catchment conditions indicate possible hazard escalation.`;
+        }
+        return `Current hydrological conditions indicate ${category.toLowerCase()} flood risk. The AI probability estimate is ${probabilityPct}%.`;
     }
 
+    if (category === "HIGH" || category === "CRITICAL") {
+        return `The AI identifies a ${category.toLowerCase()} wildfire risk with an estimated probability of ${probabilityPct}%. Thermal and smoke indicators suggest elevated fire activity.`;
+    }
 
-    /*
-     * Warning horizon
-     */
-
-    const time =
-        prediction.estimated_time_to_threshold_minutes;
-
-
-    document.getElementById(
-        "time-output"
-    ).textContent =
-        formatTime(
-            time
-        );
-
-
-    /*
-     * Confidence
-     */
-
-    document.getElementById(
-        "confidence-output"
-    ).textContent =
-        confidence === null
-            ? "—"
-            : `${Math.round(
-                confidence <= 1
-                    ? confidence * 100
-                    : confidence
-              )}%`;
-
-
-    /*
-     * Interpretation
-     */
-
-    document.getElementById(
-        "result-summary"
-    ).textContent =
-        buildSummary(
-            hazard,
-            category,
-            input,
-            probability
-        );
-
-
-    /*
-     * Swap empty state -> result.
-     */
-
-    document.getElementById(
-        "result-empty"
-    ).classList.add(
-        "hidden"
-    );
-
-    document.getElementById(
-        "result-content"
-    ).classList.remove(
-        "hidden"
-    );
+    return `Current thermal and atmospheric conditions indicate ${category.toLowerCase()} wildfire risk. The AI probability estimate is ${probabilityPct}%.`;
 }
 
-
-/* ============================================================
-   SUMMARY
-============================================================ */
-
-function buildSummary(
-    hazard,
-    category,
-    input,
-    probability
-) {
-
-    const probabilityText =
-        `${Math.round(
-            probability * 100
-        )}%`;
-
-
+function buildWarningText(node, hazard, category) {
     if (hazard === "FLOOD") {
-
-        if (
-            category === "CRITICAL"
-            ||
-            category === "HIGH"
-        ) {
-
-            return (
-                `The AI identifies a ${category.toLowerCase()} ` +
-                `flood risk with an estimated probability of ` +
-                `${probabilityText}. ` +
-                `River level, rainfall and catchment conditions ` +
-                `indicate possible hazard escalation.`
-            );
-        }
-
-
-        return (
-            `Current hydrological conditions indicate ` +
-            `${category.toLowerCase()} flood risk. ` +
-            `The AI probability estimate is ${probabilityText}.`
-        );
+        const level = Number(node.water_level_m);
+        return Number.isFinite(level)
+            ? `Node ${node.node_id} reports a river level of ${level.toFixed(2)} m against a 5.0 m danger stage.`
+            : `Node ${node.node_id} is reporting elevated flood risk.`;
     }
 
-
-    if (
-        category === "CRITICAL"
-        ||
-        category === "HIGH"
-    ) {
-
-        return (
-            `The AI identifies a ${category.toLowerCase()} ` +
-            `wildfire risk with an estimated probability of ` +
-            `${probabilityText}. ` +
-            `Thermal and smoke indicators suggest elevated ` +
-            `fire activity.`
-        );
-    }
-
-
-    return (
-        `Current thermal and atmospheric conditions indicate ` +
-        `${category.toLowerCase()} wildfire risk. ` +
-        `The AI probability estimate is ${probabilityText}.`
-    );
+    const thermal = Number(node.thermal_temp_c);
+    const pm25 = Number(node.pm25_ugm3);
+    return `Node ${node.node_id} reports thermal hotspot ${Number.isFinite(thermal) ? thermal.toFixed(1) : "—"} °C and PM2.5 ${Number.isFinite(pm25) ? pm25.toFixed(0) : "—"} µg/m³.`;
 }
 
-
-/* ============================================================
-   WARNING TEXT
-============================================================ */
-
-function buildWarningText(
-    hazard,
-    input,
-    category
-) {
-
-    if (hazard === "FLOOD") {
-
-        return (
-            `River level is ${input.water_level_m.toFixed(2)} m ` +
-            `against a 5.0 m danger stage. ` +
-            `Immediate monitoring is recommended.`
-        );
-    }
-
-
-    return (
-        `Thermal hotspot is ${input.thermal_temp_c.toFixed(1)} °C ` +
-        `with PM2.5 at ${input.pm25_ugm3.toFixed(0)} µg/m³. ` +
-        `Wildfire conditions require attention.`
-    );
+function thresholdText(value, limit) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return "—";
+    if (numeric >= limit) return "BREACHED";
+    return `${Math.max(0, Math.min(999, numeric / limit * 100)).toFixed(0)}% of limit`;
 }
 
-
-/* ============================================================
-   PRESETS — FLOOD
-============================================================ */
-
-function loadFloodPreset(
-    preset
-) {
-
-    const values = {
-
-        normal: {
-            water: 1.8,
-            rainfall: 0.5,
-            flow: 25,
-            soil: 38,
-            dam: 12
-        },
-
-        moderate: {
-            water: 3.4,
-            rainfall: 20,
-            flow: 90,
-            soil: 65,
-            dam: 16.5
-        },
-
-        critical: {
-            water: 4.85,
-            rainfall: 38.5,
-            flow: 190,
-            soil: 78,
-            dam: 22.5
-        }
-    };
-
-
-    const selected =
-        values[preset];
-
-
-    if (!selected) return;
-
-
-    setValue(
-        "water",
-        selected.water
-    );
-
-    setValue(
-        "rainfall",
-        selected.rainfall
-    );
-
-    setValue(
-        "flow",
-        selected.flow
-    );
-
-    setValue(
-        "soil",
-        selected.soil
-    );
-
-    setValue(
-        "dam",
-        selected.dam
-    );
+function formatReceivedAt(value) {
+    if (!value) return "—";
+    const raw = String(value);
+    const parsed = new Date(raw.includes("T") ? raw : raw.replace(" ", "T") + "Z");
+    if (Number.isNaN(parsed.getTime())) return raw;
+    return parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-
-/* ============================================================
-   PRESETS — FIRE
-============================================================ */
-
-function loadFirePreset(
-    preset
-) {
-
-    const values = {
-
-        normal: {
-            thermal: 26,
-            pm25: 15,
-            ambient: 26,
-            humidity: 65,
-            wind: 3
-        },
-
-        elevated: {
-            thermal: 48,
-            pm25: 70,
-            ambient: 33,
-            humidity: 28,
-            wind: 9
-        },
-
-        wildfire: {
-            thermal: 120,
-            pm25: 360,
-            ambient: 42,
-            humidity: 12,
-            wind: 22
-        }
-    };
-
-
-    const selected =
-        values[preset];
-
-
-    if (!selected) return;
-
-
-    setValue(
-        "thermal",
-        selected.thermal
-    );
-
-    setValue(
-        "pm25",
-        selected.pm25
-    );
-
-    setValue(
-        "ambient",
-        selected.ambient
-    );
-
-    setValue(
-        "humidity",
-        selected.humidity
-    );
-
-    setValue(
-        "wind",
-        selected.wind
-    );
+function formatNumber(value, decimals, unit) {
+    const number = Number(value);
+    return Number.isFinite(number) ? `${number.toFixed(decimals)} ${unit}` : "—";
 }
 
-
-/* ============================================================
-   RESULT RESET
-============================================================ */
-
-function resetResult() {
-
-    document.getElementById(
-        "result-empty"
-    ).classList.remove(
-        "hidden"
-    );
-
-
-    document.getElementById(
-        "result-content"
-    ).classList.add(
-        "hidden"
-    );
-
-
-    document.getElementById(
-        "warning-box"
-    ).classList.add(
-        "hidden"
-    );
-
-
-    document.getElementById(
-        "risk-score"
-    ).textContent =
-        "0";
+function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, Number(value) || 0));
 }
 
-
-/* ============================================================
-   HELPERS
-============================================================ */
-
-function number(
-    id,
-    fallback
-) {
-
-    const element =
-        document.getElementById(
-            id
-        );
-
-
-    const value =
-        parseFloat(
-            element?.value
-        );
-
-
-    return Number.isFinite(value)
-        ? value
-        : fallback;
-}
-
-
-function setValue(
-    id,
-    value
-) {
-
-    const element =
-        document.getElementById(
-            id
-        );
-
-
-    if (element) {
-
-        element.value =
-            value;
-    }
-}
-
-
-function clamp(
-    value,
-    min,
-    max
-) {
-
-    return Math.max(
-        min,
-        Math.min(
-            max,
-            Number(value) || 0
-        )
-    );
-}
-
-
-function normaliseRisk(
-    category,
-    score
-) {
-
+function normaliseRisk(category, score) {
     if (category) {
-
-        const text =
-            String(category)
-                .trim()
-                .toUpperCase();
-
-
-        /*
-         * Convert existing VERY LOW naming
-         * into the shorter UI terminology.
-         */
-        if (
-            text === "VERY LOW"
-            ||
-            text === "LOW"
-        ) {
-            return "LOW";
-        }
-
-
-        if (
-            text === "MODERATE"
-        ) {
-            return "MODERATE";
-        }
-
-
-        if (
-            text === "HIGH"
-        ) {
-            return "HIGH";
-        }
-
-
-        if (
-            text === "CRITICAL"
-        ) {
-            return "CRITICAL";
-        }
+        const text = String(category).trim().toUpperCase();
+        if (text === "VERY LOW" || text === "LOW") return "LOW";
+        if (["MODERATE", "HIGH", "CRITICAL"].includes(text)) return text;
     }
-
-
-    if (score <= 40) {
-        return "LOW";
-    }
-
-    if (score <= 60) {
-        return "MODERATE";
-    }
-
-    if (score <= 80) {
-        return "HIGH";
-    }
-
+    if (score <= 40) return "LOW";
+    if (score <= 60) return "MODERATE";
+    if (score <= 80) return "HIGH";
     return "CRITICAL";
 }
 
-
-function riskColour(
-    category
-) {
-
+function riskColour(category) {
     switch (category) {
-
-        case "LOW":
-            return "#17865b";
-
-        case "MODERATE":
-            return "#b87800";
-
-        case "HIGH":
-            return "#c15b12";
-
-        case "CRITICAL":
-            return "#c93535";
-
-        default:
-            return "#102033";
+        case "LOW": return "#17865b";
+        case "MODERATE": return "#b87800";
+        case "HIGH": return "#c15b12";
+        case "CRITICAL": return "#c93535";
+        default: return "#102033";
     }
 }
 
-
-function riskStateClass(
-    category
-) {
-
-    switch (category) {
-
-        case "LOW":
-            return "state-low";
-
-        case "MODERATE":
-            return "state-moderate";
-
-        case "HIGH":
-            return "state-high";
-
-        case "CRITICAL":
-            return "state-critical";
-
-        default:
-            return "state-low";
-    }
+function riskStateClass(category) {
+    return `state-${category.toLowerCase()}`;
 }
 
-
-function formatTime(
-    minutes
-) {
-
-    if (
-        minutes === null
-        ||
-        minutes === undefined
-        ||
-        !Number.isFinite(
-            Number(minutes)
-        )
-    ) {
-        return "—";
-    }
-
-
-    const value =
-        Number(minutes);
-
-
-    if (value <= 0) {
-        return "NOW";
-    }
-
-
-    if (value < 60) {
-
-        return `${Math.round(
-            value
-        )} min`;
-    }
-
-
-    const hours =
-        Math.floor(
-            value / 60
-        );
-
-    const mins =
-        Math.round(
-            value % 60
-        );
-
-
-    return `${hours}h ${mins}m`;
+function riskTextClass(category) {
+    return `risk-text-${category.toLowerCase()}`;
 }
 
-
-/* ============================================================
-   BUTTON STATE
-============================================================ */
-
-function setButtonLoading(
-    button,
-    loading,
-    text
-) {
-
-    if (!button) return;
-
-
-    button.disabled =
-        loading;
-
-
-    const spans =
-        button.querySelectorAll(
-            "span"
-        );
-
-
-    if (spans.length > 0) {
-
-        spans[0].textContent =
-            text;
-    }
+function formatTime(minutes) {
+    if (minutes === null || minutes === undefined || !Number.isFinite(Number(minutes))) return "—";
+    const value = Number(minutes);
+    if (value <= 0) return "NOW";
+    if (value < 60) return `${Math.round(value)} min`;
+    return `${Math.floor(value / 60)}h ${Math.round(value % 60)}m`;
 }
 
-
-/* ============================================================
-   API ERROR
-============================================================ */
-
-async function getApiError(
-    response
-) {
-
+async function getApiError(response) {
     try {
-
-        const data =
-            await response.json();
-
-
-        if (
-            typeof data.detail ===
-            "string"
-        ) {
-            return data.detail;
-        }
-
-
-        return JSON.stringify(
-            data.detail || data
-        );
-
+        const data = await response.json();
+        return typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail || data);
     } catch {
-
-        try {
-
-            return await response.text();
-
-        } catch {
-
-            return `Server returned ${response.status}`;
-        }
+        return `Server returned ${response.status}`;
     }
 }
 
-
-/* ============================================================
-   USER-FACING ERROR
-============================================================ */
-
-function showError(
-    message
-) {
-
-    const empty =
-        document.getElementById(
-            "result-empty"
-        );
-
-
-    empty.classList.remove(
-        "hidden"
-    );
-
-
-    document.getElementById(
-        "result-content"
-    ).classList.add(
-        "hidden"
-    );
-
-
-    empty.querySelector(
-        "h3"
-    ).textContent =
-        "Analysis failed";
-
-
-    empty.querySelector(
-        "p"
-    ).textContent =
-        message ||
-        "Unable to connect to the AI inference service.";
+function escapeHtml(value) {
+    return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
 }

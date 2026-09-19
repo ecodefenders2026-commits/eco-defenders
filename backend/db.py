@@ -8,7 +8,7 @@ active early warning alerts, and model version metadata.
 import os
 import sqlite3
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "eco_defenders.db")
 
@@ -89,6 +89,14 @@ def init_db():
         cursor.execute("ALTER TABLE predictions ADD COLUMN pm25_ugm3 REAL;")
     except Exception:
         pass
+    try:
+        cursor.execute("ALTER TABLE predictions ADD COLUMN confidence REAL;")
+    except Exception:
+        pass
+    try:
+        cursor.execute("ALTER TABLE predictions ADD COLUMN fire_probability REAL;")
+    except Exception:
+        pass
     
     # 3. Alerts Table
     cursor.execute("""
@@ -161,8 +169,8 @@ def save_reading_and_prediction(payload: dict, response: dict):
     INSERT INTO predictions (
         node_id, timestamp, latitude, longitude, water_level_m, rainfall_mm,
         flood_probability, risk_score, risk_category, severity, estimated_time_to_threshold,
-        secondary_hazard, sensor_quality_status, model_version, warning_required
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        secondary_hazard, sensor_quality_status, model_version, warning_required, confidence
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         loc.get("node_id"), response.get("timestamp"),
         loc.get("latitude"), loc.get("longitude"),
@@ -171,7 +179,8 @@ def save_reading_and_prediction(payload: dict, response: dict):
         pred.get("risk_category"), pred.get("severity"),
         pred.get("estimated_time_to_threshold_minutes"),
         pred.get("secondary_hazard"), qual.get("status"),
-        mod.get("version"), 1 if pred.get("warning_required") else 0
+        mod.get("version"), 1 if pred.get("warning_required") else 0,
+        pred.get("confidence")
     ))
     
     # Save active alert if warning required
@@ -221,8 +230,8 @@ def save_fire_reading_and_prediction(payload: dict, response: dict):
         thermal_temp_c, pm25_ugm3,
         flood_probability, risk_score, risk_category, severity,
         estimated_time_to_threshold, secondary_hazard, sensor_quality_status,
-        model_version, warning_required
-    ) VALUES (?, ?, ?, ?, 'FOREST_FIRE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        model_version, warning_required, confidence, fire_probability
+    ) VALUES (?, ?, ?, ?, 'FOREST_FIRE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         node_id, ts, loc.get("latitude", 18.25), loc.get("longitude", 78.65),
         thermal, pm25,
@@ -230,7 +239,8 @@ def save_fire_reading_and_prediction(payload: dict, response: dict):
         pred.get("risk_category", "LOW"), pred.get("severity", "MINIMAL"),
         pred.get("estimated_time_to_threshold_minutes"),
         pred.get("secondary_hazard"), qual.get("status", "OK"),
-        mod.get("version", "1.0.0"), 1 if pred.get("warning_required") else 0
+        mod.get("version", "1.0.0"), 1 if pred.get("warning_required") else 0,
+        pred.get("confidence"), pred.get("fire_probability")
     ))
     
     if pred.get("warning_required"):
@@ -247,95 +257,77 @@ def save_fire_reading_and_prediction(payload: dict, response: dict):
     conn.close()
 
 
-def get_latest_node_statuses():
+def get_latest_node_statuses(live_only: bool = False, stale_after_seconds: int = 60):
+    """Return the latest real status for every node without rewriting node IDs."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
-    SELECT p1.*, 
-           COALESCE(p1.water_level_m, r.water_level_m, 1.85) as water_level_m,
-           COALESCE(p1.rainfall_mm, r.rainfall_mm, 0.0) as rainfall_mm,
-           COALESCE(p1.thermal_temp_c, 26.5) as thermal_temp_c,
-           COALESCE(p1.pm25_ugm3, 18.0) as pm25_ugm3,
-           COALESCE(p1.hazard_type, 'FLOOD') as hazard_type,
-           r.river_flow, r.soil_moisture, r.temperature, r.humidity, r.wind_speed
+    SELECT p1.*,
+           COALESCE(p1.water_level_m, r.water_level_m) as latest_water_level_m,
+           COALESCE(p1.rainfall_mm, r.rainfall_mm) as latest_rainfall_mm,
+           p1.thermal_temp_c as latest_thermal_temp_c,
+           p1.pm25_ugm3 as latest_pm25_ugm3,
+           r.river_flow, r.soil_moisture, r.temperature, r.humidity, r.pressure, r.wind_speed
     FROM predictions p1
     INNER JOIN (
         SELECT node_id, MAX(prediction_id) as max_id
         FROM predictions
         GROUP BY node_id
     ) p2 ON p1.node_id = p2.node_id AND p1.prediction_id = p2.max_id
-    LEFT JOIN sensor_readings r ON r.node_id = p1.node_id AND r.timestamp = p1.timestamp
+    LEFT JOIN sensor_readings r
+      ON r.node_id = p1.node_id AND r.timestamp = p1.timestamp
     ORDER BY p1.prediction_id DESC;
     """)
     rows = cursor.fetchall()
     conn.close()
-    
-    results = [dict(r) for r in rows]
-    
-    # Return exactly TWO canonical nodes: Flood Risk Node & Forest Fire Node
-    final_nodes = []
-    
-    # 1. Flood Node (NODE_FLOOD_01)
-    flood_match = next((n for n in results if n.get("hazard_type") == "FLOOD" or n.get("node_id") in ["NODE_FLOOD_01", "NODE_017", "NODE_001"]), None)
-    if flood_match:
-        f_entry = dict(flood_match)
-        f_entry["node_id"] = "NODE_FLOOD_01"
-        f_entry["node_name"] = "River Basin Station"
-        f_entry["hazard_type"] = "FLOOD"
-        f_entry["hazard_label"] = "Flood Risk Analysis"
-        f_entry["danger_threshold_m"] = 5.0
-        f_entry["dam_capacity_m"] = 25.0
-        final_nodes.append(f_entry)
-    else:
-        final_nodes.append({
-            "node_id": "NODE_FLOOD_01",
-            "node_name": "River Basin Station",
-            "hazard_type": "FLOOD",
-            "hazard_label": "Flood Risk Analysis",
-            "risk_score": 15,
-            "risk_category": "VERY LOW",
-            "severity": "MINIMAL",
-            "water_level_m": 1.85,
-            "rainfall_mm": 1.2,
-            "river_flow": 28.0,
-            "soil_moisture": 38.0,
-            "dam_water_level_m": 12.5,
-            "dam_capacity_m": 25.0,
-            "danger_threshold_m": 5.0,
-            "warning_required": False
-        })
-        
-    # 2. Forest Fire Node (NODE_FIRE_01)
-    fire_match = next((n for n in results if n.get("hazard_type") == "FOREST_FIRE" or n.get("node_id") == "NODE_FIRE_01"), None)
-    if fire_match:
-        fi_entry = dict(fire_match)
-        fi_entry["node_id"] = "NODE_FIRE_01"
-        fi_entry["node_name"] = "Forest Catchment Station"
-        fi_entry["hazard_type"] = "FOREST_FIRE"
-        fi_entry["hazard_label"] = "Forest Fire Analysis"
-        fi_entry["thermal_danger_threshold_c"] = 65.0
-        fi_entry["pm25_danger_threshold_ugm3"] = 120.0
-        final_nodes.append(fi_entry)
-    else:
-        final_nodes.append({
-            "node_id": "NODE_FIRE_01",
-            "node_name": "Forest Catchment Station",
-            "hazard_type": "FOREST_FIRE",
-            "hazard_label": "Forest Fire Analysis",
-            "risk_score": 18,
-            "risk_category": "VERY LOW",
-            "severity": "MINIMAL",
-            "thermal_temp_c": 26.5,
-            "pm25_ugm3": 18.0,
-            "temperature": 29.0,
-            "humidity": 55.0,
-            "wind_speed": 4.2,
-            "thermal_danger_threshold_c": 65.0,
-            "pm25_danger_threshold_ugm3": 120.0,
-            "warning_required": False
-        })
-        
-    return final_nodes
+
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    results = []
+    node_names = {
+        "NODE_FLOOD_01": "River Basin Station",
+        "NODE_FIRE_01": "Forest Catchment Station",
+    }
+
+    for row in rows:
+        item = dict(row)
+        received_at = item.get("created_at") or item.get("timestamp")
+        age_seconds = None
+
+        if received_at:
+            try:
+                parsed = datetime.fromisoformat(str(received_at).replace("Z", ""))
+                age_seconds = max(0, int((now_utc - parsed).total_seconds()))
+            except Exception:
+                age_seconds = None
+
+        hazard = item.get("hazard_type") or "FLOOD"
+        node_id = item.get("node_id")
+        item["hazard_type"] = hazard
+        item["node_id"] = node_id
+        item["node_name"] = node_names.get(node_id, f"Monitoring Node {node_id}")
+        item["hazard_label"] = "Forest Fire Analysis" if hazard == "FOREST_FIRE" else "Flood Risk Analysis"
+        item["last_received_at"] = received_at
+        item["age_seconds"] = age_seconds
+        item["is_online"] = age_seconds is not None and age_seconds <= stale_after_seconds
+
+        item["water_level_m"] = item.get("latest_water_level_m")
+        item["rainfall_mm"] = item.get("latest_rainfall_mm")
+        item["thermal_temp_c"] = item.get("latest_thermal_temp_c")
+        item["pm25_ugm3"] = item.get("latest_pm25_ugm3")
+
+        if hazard == "FLOOD":
+            item["danger_threshold_m"] = 5.0
+            item["dam_capacity_m"] = 25.0
+        else:
+            item["thermal_danger_threshold_c"] = 65.0
+            item["pm25_danger_threshold_ugm3"] = 120.0
+
+        if live_only and not item["is_online"]:
+            continue
+
+        results.append(item)
+
+    return results
 
 
 def get_node_history(node_id: str, limit: int = 50):
@@ -356,12 +348,10 @@ def get_node_history(node_id: str, limit: int = 50):
            COALESCE(r.wind_speed, 5.0) as wind_speed
     FROM predictions p
     LEFT JOIN sensor_readings r ON r.node_id = p.node_id AND r.timestamp = p.timestamp
-    WHERE p.node_id = ? 
-       OR (p.node_id IN ('NODE_001', 'NODE_017') AND ? = 'NODE_FLOOD_01')
-       OR (p.node_id = 'NODE_FLOOD_01' AND ? = 'NODE_017')
+    WHERE p.node_id = ?
     ORDER BY p.prediction_id DESC
     LIMIT ?
-    """, (node_id, node_id, node_id, limit))
+    """, (node_id, limit))
     rows = cursor.fetchall()
     conn.close()
     return [dict(r) for r in rows][::-1]  # Chronological order

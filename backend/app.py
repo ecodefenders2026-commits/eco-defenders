@@ -13,8 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 
 from backend.schema import (
-    SensorPayload, PredictionResponse, LocationDetails, ModelDetails, 
-    SensorQualityStatus, PredictionDetails, FireSensorPayload, FirePredictionResponse
+    SensorPayload, PredictionResponse, FireSensorPayload, FirePredictionResponse, TelemetryEnvelope
 )
 from backend.validator import validate_sensor_payload
 from backend.inference import run_flood_inference
@@ -153,10 +152,77 @@ def predict_fire(payload: FireSensorPayload):
     return response
 
 
+@app.post("/api/v1/telemetry")
+def ingest_telemetry(packet: TelemetryEnvelope):
+    """
+    Canonical live telemetry ingestion endpoint for simulators, ESP32 gateways,
+    and future LoRa gateways. The node_id is preserved all the way through
+    validation, inference, storage, and the dashboard output.
+    """
+    common = packet.model_dump(exclude_none=True)
+    common.pop("hazard_type", None)
+
+    if packet.hazard_type == "FLOOD":
+        required = [
+            "rainfall_mm", "water_level_m", "river_flow", "soil_moisture",
+            "temperature", "humidity", "pressure", "wind_speed"
+        ]
+        missing = [key for key in required if key not in common]
+        if missing:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": "Missing flood telemetry fields", "fields": missing}
+            )
+
+        if common.get("dam_water_level_m") is None:
+            common["dam_water_level_m"] = 25.0
+        if common.get("dam_capacity") is None:
+            common["dam_capacity"] = 35.0
+        if common.get("latitude") is None:
+            common["latitude"] = 18.1234
+        if common.get("longitude") is None:
+            common["longitude"] = 78.5678
+
+        payload = SensorPayload(**common)
+        prediction = predict_flood(payload)
+        return {
+            "status": "received",
+            "hazard_type": packet.hazard_type,
+            "node_id": packet.node_id,
+            "prediction": prediction,
+        }
+
+    required = ["thermal_temp_c", "pm25_ugm3"]
+    missing = [key for key in required if key not in common]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "Missing forest-fire telemetry fields", "fields": missing}
+        )
+
+    if common.get("latitude") is None:
+        common["latitude"] = 18.2500
+    if common.get("longitude") is None:
+        common["longitude"] = 78.6500
+
+    payload = FireSensorPayload(**common)
+    prediction = predict_fire(payload)
+    return {
+        "status": "received",
+        "hazard_type": packet.hazard_type,
+        "node_id": packet.node_id,
+        "prediction": prediction,
+    }
+
+
 @app.get("/api/v1/nodes")
-def get_nodes():
-    statuses = get_latest_node_statuses()
-    return {"nodes": statuses}
+def get_nodes(live_only: bool = False):
+    statuses = get_latest_node_statuses(live_only=live_only)
+    return {
+        "nodes": statuses,
+        "count": len(statuses),
+        "server_time": time.strftime("%Y-%m-%dT%H:%M:%S+05:30"),
+    }
 
 
 @app.get("/api/v1/history/{node_id}")

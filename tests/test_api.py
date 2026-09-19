@@ -97,11 +97,11 @@ def test_node_synchronization_and_history():
     assert pred["danger_threshold_m"] == 5.0
     assert pred["dam_capacity_m"] == 25.0
     
-    # 2. Check /api/v1/nodes returns exactly the two nodes (Flood & Fire)
+    # 2. Check /api/v1/nodes preserves real node IDs and supports additional nodes.
     nodes_res = client.get("/api/v1/nodes")
     assert nodes_res.status_code == 200
     nodes = nodes_res.json()["nodes"]
-    assert len(nodes) == 2, "Must return exactly two nodes: Flood and Fire"
+    assert len(nodes) >= 2
     node_ids = [n["node_id"] for n in nodes]
     assert "NODE_FLOOD_01" in node_ids
     assert "NODE_FIRE_01" in node_ids
@@ -150,3 +150,32 @@ def test_predict_fire_valid_contract():
     assert hist[-1]["thermal_temp_c"] == 125.0
     assert hist[-1]["pm25_ugm3"] == 380.0
 
+
+
+def test_live_telemetry_ingestion_preserves_node_id():
+    payload = {
+        "hazard_type": "FLOOD",
+        "node_id": "NODE_LIVE_07",
+        "timestamp": "2026-09-19T11:30:00+05:30",
+        "latitude": 18.1234,
+        "longitude": 78.5678,
+        "rainfall_mm": 12.5,
+        "water_level_m": 3.8,
+        "river_flow": 120.0,
+        "soil_moisture": 65.0,
+        "dam_water_level_m": 18.0,
+        "dam_capacity": 25.0,
+        "temperature": 26.0,
+        "humidity": 80.0,
+        "pressure": 1004.0,
+        "wind_speed": 8.0
+    }
+    res = client.post("/api/v1/telemetry", json=payload)
+    assert res.status_code == 200
+    assert res.json()["node_id"] == "NODE_LIVE_07"
+
+    nodes = client.get("/api/v1/nodes?live_only=true").json()["nodes"]
+    node = next(n for n in nodes if n["node_id"] == "NODE_LIVE_07")
+    assert node["node_id"] == "NODE_LIVE_07"
+    assert node["hazard_type"] == "FLOOD"
+    assert node["is_online"] is True

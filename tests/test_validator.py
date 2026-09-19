@@ -14,7 +14,7 @@ from backend.validator import validate_sensor_payload
 def test_valid_sensor_payload():
     valid_payload = {
         "node_id": "NODE_TEST_01",
-        "timestamp": "2026-09-17T19:30:00+05:30",
+        "timestamp": "2026-09-19T10:30:00+05:30",
         "rainfall_mm": 12.5,
         "water_level_m": 3.4,
         "river_flow": 120.0,
@@ -34,7 +34,7 @@ def test_valid_sensor_payload():
 def test_invalid_coordinates():
     invalid_payload = {
         "node_id": "NODE_TEST_02",
-        "timestamp": "2026-09-17T19:30:00+05:30",
+        "timestamp": "2026-09-19T10:30:00+05:30",
         "rainfall_mm": 5.0,
         "water_level_m": 2.0,
         "latitude": 999.0,  # Invalid
@@ -48,7 +48,7 @@ def test_invalid_coordinates():
 def test_negative_rainfall_auto_correction():
     payload = {
         "node_id": "NODE_TEST_03",
-        "timestamp": "2026-09-17T19:30:00+05:30",
+        "timestamp": "2026-09-19T10:30:00+05:30",
         "rainfall_mm": -15.0,  # Invalid negative
         "water_level_m": 2.0,
         "latitude": 18.1234,

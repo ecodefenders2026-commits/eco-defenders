@@ -1559,3 +1559,223 @@ footer {
             5px;
     }
 }
+/* ============================================================
+   LIVE OUTPUT-ONLY DASHBOARD
+============================================================ */
+
+.live-mode .hazard-selector,
+.live-mode .preset-row,
+.live-mode .analyze-btn,
+.live-mode form {
+    display: none !important;
+}
+
+.live-mode .workspace {
+    grid-template-columns: 1fr 1fr;
+}
+
+.live-node-panel {
+    padding: 24px;
+}
+
+.live-meta-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 24px;
+}
+
+.live-meta {
+    padding: 13px;
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    background: var(--panel-soft);
+}
+
+.live-meta span,
+.telemetry-item span,
+.nodes-heading .section-label,
+.telemetry-heading .section-label,
+.result-node-strip span {
+    display: block;
+    color: #8b96a6;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.10em;
+}
+
+.live-meta strong {
+    display: block;
+    margin-top: 6px;
+    color: var(--text);
+    font-size: 12px;
+}
+
+.telemetry-heading {
+    margin-bottom: 10px;
+}
+
+.telemetry-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--border);
+}
+
+.telemetry-item {
+    min-width: 0;
+    padding: 14px;
+    background: #fff;
+}
+
+.telemetry-item strong {
+    display: block;
+    margin-top: 6px;
+    color: var(--text);
+    font-family: "Space Grotesk", sans-serif;
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.nodes-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 22px;
+    margin-bottom: 10px;
+}
+
+.nodes-count {
+    display: inline-flex;
+    min-width: 22px;
+    height: 22px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 7px;
+    background: var(--panel-soft);
+    color: var(--text-soft);
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.node-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 195px;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+
+.node-card {
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    padding: 11px 12px;
+    background: #fff;
+}
+
+.node-card.active {
+    border-color: #b9c6d6;
+    box-shadow: 0 0 0 2px rgba(22,119,210,0.06);
+}
+
+.node-card-top,
+.node-card-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.node-card-top strong {
+    display: block;
+    color: var(--text);
+    font-family: monospace;
+    font-size: 10px;
+}
+
+.node-card-top span,
+.node-card-bottom span:first-child {
+    color: #7f8a9b;
+    font-size: 9px;
+}
+
+.node-card-top span {
+    display: block;
+    margin-top: 4px;
+}
+
+.node-card-score {
+    font-family: "Space Grotesk", sans-serif;
+    font-size: 21px;
+    font-weight: 700;
+}
+
+.node-card-bottom {
+    margin-top: 7px;
+}
+
+.node-card-state {
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+}
+
+.node-empty {
+    padding: 18px 8px;
+    color: var(--text-soft);
+    font-size: 11px;
+    text-align: center;
+}
+
+.result-node-strip {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    margin-bottom: 18px;
+    overflow: hidden;
+}
+
+.result-node-strip > div {
+    padding: 12px;
+    background: var(--panel-soft);
+}
+
+.result-node-strip > div + div {
+    border-left: 1px solid var(--border);
+}
+
+.result-node-strip strong {
+    display: block;
+    margin-top: 5px;
+    color: var(--text);
+    font-family: monospace;
+    font-size: 10px;
+}
+
+.risk-text-low { color: var(--green); }
+.risk-text-moderate { color: var(--yellow); }
+.risk-text-high { color: #c15b12; }
+.risk-text-critical { color: var(--red); }
+
+.status-waiting {
+    background: #b87800 !important;
+    box-shadow: 0 0 0 4px rgba(184,120,0,0.10) !important;
+}
+
+.status-error {
+    background: var(--red) !important;
+    box-shadow: 0 0 0 4px rgba(201,53,53,0.10) !important;
+}
+
+@media (max-width: 820px) {
+    .live-mode .workspace {
+        grid-template-columns: 1fr;
+    }
+}
